@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Dual N-Back</title>
+  <meta name="description" content="Dual n-back working-memory training. Runs offline, no account needed.">
+  <meta name="theme-color" id="theme-color" content="#f5f5f7">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="N-Back">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash of the wrong colours.
+    (function () {
+      try {
+        var s = JSON.parse(localStorage.getItem('nback.settings') || '{}');
+        var root = document.documentElement;
+        if (s.theme === 'light' || s.theme === 'dark') root.setAttribute('data-theme', s.theme);
+        var dark = s.theme === 'dark' ||
+          (s.theme !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.getElementById('theme-color').setAttribute('content', dark ? '#121316' : '#f5f5f7');
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1>Dual N-Back</h1>
+    </header>
+
+    <main>
+      <!-- ===== Home / level select ===== -->
+      <section id="view-home" class="view" aria-label="Play">
+        <div class="notice warn" id="audio-warning" hidden>
+          Speech synthesis isn't available in this browser, so letters will be shown on screen instead of spoken.
+        </div>
+        <div class="notice warn" id="storage-warning" hidden>
+          Storage is unavailable (private browsing?). Rounds will not be saved to history.
+        </div>
+
+        <div class="level-picker">
+          <button class="step" id="n-down" aria-label="Decrease n">&minus;</button>
+          <div class="level-display">
+            <span class="label">n-back</span>
+            <span class="value" id="n-value">2</span>
+          </div>
+          <button class="step" id="n-up" aria-label="Increase n">+</button>
+        </div>
+        <p class="round-info muted" id="round-info"></p>
+
+        <button class="btn btn-primary btn-big" id="start-btn">Start round</button>
+
+        <details class="howto">
+          <summary>How to play</summary>
+          <p>Each trial, one square lights up and a letter is spoken.</p>
+          <ul>
+            <li>Tap <strong>Position</strong> if the square is the same one as <em>n</em> trials ago.</li>
+            <li>Tap <strong>Letter</strong> if the letter is the same as <em>n</em> trials ago.</li>
+            <li>Tap both, one, or neither &mdash; any time before the next trial starts.</li>
+            <li>On a keyboard: <kbd>A</kbd> = position, <kbd>L</kbd> = letter.</li>
+          </ul>
+          <p>A round is 20 + <em>n</em> trials. Scoring counts hits, misses and false alarms, so ignoring the buttons doesn't score well.</p>
+        </details>
+      </section>
+
+      <!-- ===== Game ===== -->
+      <section id="view-game" class="view" aria-label="Round in progress" hidden>
+        <div class="game-top">
+          <span class="game-status" id="game-status">n = 2</span>
+          <button class="btn btn-ghost" id="stop-btn">End round</button>
+        </div>
+        <div class="grid-wrap">
+          <div class="grid" id="grid" aria-hidden="true"></div>
+          <div class="overlay" id="game-overlay" hidden>Ready&hellip;</div>
+          <div class="letter-fallback" id="letter-fallback" hidden></div>
+        </div>
+        <div class="responses">
+          <button class="resp-btn" id="btn-position" disabled>
+            <span class="title">Position</span>
+            <span class="sub">match</span>
+            <kbd>A</kbd>
+          </button>
+          <button class="resp-btn" id="btn-letter" disabled>
+            <span class="title">Letter</span>
+            <span class="sub">match</span>
+            <kbd>L</kbd>
+          </button>
+        </div>
+        <p class="game-hint muted" id="game-hint"></p>
+      </section>
+
+      <!-- ===== Results ===== -->
+      <section id="view-results" class="view" aria-label="Round results" hidden>
+        <h2 id="res-title">Round complete</h2>
+        <div class="scores">
+          <div class="score">
+            <div class="label">Position</div>
+            <div class="value" id="res-pos">–</div>
+            <div class="detail" id="res-pos-detail"></div>
+          </div>
+          <div class="score">
+            <div class="label">Letter</div>
+            <div class="value" id="res-let">–</div>
+            <div class="detail" id="res-let-detail"></div>
+          </div>
+          <div class="score combined">
+            <div class="label">Combined</div>
+            <div class="value" id="res-comb">–</div>
+            <div class="detail" id="res-comb-detail"></div>
+          </div>
+        </div>
+
+        <div class="notice" id="suggestion" hidden>
+          <p id="sugg-text"></p>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="sugg-accept">Try it</button>
+            <button class="btn" id="sugg-dismiss">Not now</button>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn" id="done-btn">Done</button>
+          <button class="btn btn-primary" id="again-btn">Play again</button>
+        </div>
+        <p class="muted small" style="margin-top:16px">
+          Accuracy = hits &divide; (hits + misses + false alarms). Combined is the average of the two.
+        </p>
+      </section>
+
+      <!-- ===== History ===== -->
+      <section id="view-history" class="view" aria-label="History" hidden>
+        <h2>History</h2>
+        <div class="stats">
+          <div class="stat"><div class="value" id="stat-sessions">0</div><div class="label">rounds</div></div>
+          <div class="stat"><div class="value" id="stat-best">–</div><div class="label">highest n</div></div>
+          <div class="stat"><div class="value" id="stat-avg">–</div><div class="label">avg, last 10</div></div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-head">
+            <div class="legend">
+              <span class="acc">Combined accuracy</span>
+              <span class="lvl">n-level</span>
+            </div>
+            <select id="chart-range" aria-label="Chart range">
+              <option value="20" selected>Last 20</option>
+              <option value="50">Last 50</option>
+              <option value="0">All</option>
+            </select>
+          </div>
+          <canvas id="chart" role="img" aria-label="Progress chart"></canvas>
+        </div>
+
+        <p class="muted" id="history-empty" style="margin-top:20px">No rounds yet. Play one and it will show up here.</p>
+        <ul class="history-list" id="history-list"></ul>
+      </section>
+
+      <!-- ===== Settings ===== -->
+      <section id="view-settings" class="view" aria-label="Settings" hidden>
+        <h2>Settings</h2>
+
+        <div class="setting">
+          <div class="setting-row">
+            <label class="setting-title" for="pace">Trial pace</label>
+            <span id="pace-value">2.5 s</span>
+          </div>
+          <input type="range" id="pace" min="1500" max="4000" step="100" value="2500">
+          <p class="desc">How long each stimulus is shown before the next trial. Default 2.5 s.</p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-title">Appearance</div>
+          <div class="segmented" id="theme-seg" role="group" aria-label="Theme">
+            <button data-theme="system" aria-pressed="true">System</button>
+            <button data-theme="light" aria-pressed="false">Light</button>
+            <button data-theme="dark" aria-pressed="false">Dark</button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-row">
+            <label class="setting-title" for="feedback">Instant feedback</label>
+            <span class="switch"><input type="checkbox" id="feedback" checked></span>
+          </div>
+          <p class="desc">Colour a button green or red when you tap it, and flash it when you miss a match.</p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-row">
+            <div class="setting-title">Audio</div>
+            <button class="btn" id="test-audio">Test voice</button>
+          </div>
+          <p class="desc" id="audio-desc">Letters are spoken with your device's built-in speech voice. If you hear nothing on iPhone, check the silent switch and volume.</p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-row">
+            <label class="setting-title" for="reminder">Daily reminder</label>
+            <span class="switch"><input type="checkbox" id="reminder"></span>
+          </div>
+          <div class="setting-row" style="margin-top:10px">
+            <label for="reminder-time" class="muted">Remind me at</label>
+            <input type="time" id="reminder-time" value="09:00">
+          </div>
+          <p class="desc" id="reminder-note"></p>
+          <div class="inline-actions">
+            <button class="btn" id="test-notification">Send test notification</button>
+          </div>
+        </div>
+
+        <div class="setting">
+          <div class="setting-row">
+            <div class="setting-title">Install</div>
+            <button class="btn btn-primary" id="install-btn" hidden>Install app</button>
+          </div>
+          <p class="desc" id="install-note"></p>
+        </div>
+
+        <div class="setting">
+          <div class="setting-row">
+            <div class="setting-title">Data</div>
+            <button class="btn btn-danger" id="clear-history">Clear history</button>
+          </div>
+          <p class="desc">History is stored only on this device in the browser's local storage.</p>
+        </div>
+
+        <p class="muted small" style="margin-top:16px">Dual N-Back <span id="version"></span> &middot; works offline once installed.</p>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="Main">
+      <button data-view="home" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>
+        Play
+      </button>
+      <button data-view="history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M5 15l4-5 4 3 6-7"/></svg>
+        History
+      </button>
+      <button data-view="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        Settings
+      </button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
