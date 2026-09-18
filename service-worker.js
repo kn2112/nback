@@ -4,7 +4,7 @@
 // Bump VERSION whenever you change any file in ASSETS. The app shows an
 // "Update available" toast when a new version is waiting.
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const CACHE_NAME = `nback-v${VERSION}`;
 
 const ASSETS = [
